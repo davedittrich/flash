@@ -11,3 +11,4 @@ loo
 wifi.yml
 flash-wifi.sh
 flash.sh
+.python_secrets_environment
