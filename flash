@@ -141,7 +141,6 @@ fi
 
 case "${OSTYPE}" in
   darwin*)
-    alias grep="grep --color=never"
     size_opt="-f %z"
     bs_size=1m
 
@@ -153,12 +152,16 @@ case "${OSTYPE}" in
 
     validate_yaml() {
       set +e
-      if _RET=$(ruby -e "require 'yaml';YAML.load_file('$1')" 2>&1); then
-        set -e
-        return 0
+      if [[ $(sed -n '/^#cloud-config/p;q' "$1") ]]; then
+        if _RET=$(ruby -e "require 'yaml';YAML.load_file('$1')" 2>&1); then
+          set -e
+          return 0
+        fi
+        echo "File $1 is not a valid YAML file!"
+        echo "$_RET" | grep --color=never -v "from "
+      else
+        echo "File $1 is not a valid YAML file! It must contain #cloud-config in the first line."
       fi
-      echo "File $1 is not a valid YAML file!"
-      echo "$_RET" | grep -v "from "
       set -e
       false
     }
@@ -183,7 +186,7 @@ case "${OSTYPE}" in
     # Show in the standard output the devices that are a likely
     # destination for the tool to write an image to.
     show_devices() {
-      diskutil list | grep FDisk_partition_scheme | awk 'NF>1{print $NF}'
+      diskutil list | grep --color=never FDisk_partition_scheme | awk 'NF>1{print $NF}'
     }
 
     # Check that the target device can be written. It will return 0 in
@@ -197,7 +200,7 @@ case "${OSTYPE}" in
         _RET=1
         return
       fi
-      readonlymedia=$(diskutil info "$disk" | grep "Read-Only Media" | awk 'NF>1{print $NF}')
+      readonlymedia=$(diskutil info "$disk" | grep --color=never "Read-Only Media" | awk 'NF>1{print $NF}')
       if [[ $readonlymedia == "No" ]] ; then
         _RET=1
       else
@@ -232,7 +235,7 @@ case "${OSTYPE}" in
         mv "$rawdisk" "${rawdisk}.readonly.dmg"
         hdiutil convert "${rawdisk}.readonly.dmg" -format UDRW -o "$rawdisk"
         rm -f "${rawdisk}.readonly.dmg"
-        disk=$(hdiutil attach "$rawdisk" | grep FAT | sed 's/s1 .*$//')
+        disk=$(hdiutil attach "$rawdisk" | grep --color=never FAT | sed 's/s1 .*$//')
         echo mounted FAT partition to "$disk"
         if [ "$disk" == "" ]; then
           echo Failed attaching "$rawdisk"
@@ -331,8 +334,16 @@ case "${OSTYPE}" in
     }
 
     validate_yaml() {
-      ## NO-OP in Linux
-      true
+      set +e
+      if [[ $(sed -n '/^#cloud-config/p;q' "$1") ]]; then
+        # no further yaml validation on Linux right now
+        set -e
+        return 0
+      else
+        echo "File $1 is not a valid YAML file! It must contain #cloud-config in the first line."
+      fi
+      set -e
+      false
     }
 
     # Try to identify the most likely device that the user will use to
@@ -340,7 +351,7 @@ case "${OSTYPE}" in
     #
     # @return _RET the name of the device to use
     autodetect_device() {
-      _RET=$(lsblk -p -n -o NAME -d | grep mmcblk || true)
+      _RET=$(lsblk -p -n -o NAME -d | grep --color=never mmcblk || true)
     }
 
     # Show in the standard output the devices that are a likely
@@ -385,7 +396,7 @@ case "${OSTYPE}" in
         return
       fi
 
-      if sudo hdparm -r "$disk" | grep -q off; then
+      if sudo hdparm -r "$disk" | grep --color=never -q off; then
         _RET=1
       else
         _RET=0
@@ -428,7 +439,7 @@ case "${OSTYPE}" in
     #
     # @param arg1 the disk to unmount
     umount_disk() {
-      for i in $(df |grep "$1" | awk '{print $1}')
+      for i in $(df |grep --color=never "$1" | awk '{print $1}')
       do
         sudo umount "$i"
       done
@@ -494,7 +505,23 @@ fi
 
 check_requirements
 
+http_download() {
+  local uri="${1}"
+  local tmp="/tmp/${2}"
+
+  if beginswith http:// "${uri}" || beginswith https:// "${uri}"; then
+    command -v curl 2>/dev/null || error "Error: curl not found. Aborting" 1
+    echo "Downloading ${uri} ..."
+    curl -L --fail -o "${tmp}" "${uri}"
+    _RET="${tmp}"
+  else
+    _RET="${uri}"
+  fi
+}
+
 if [ -n "${USER_DATA}" ]; then
+  http_download "$USER_DATA" "flash.user_data.yaml"
+  USER_DATA="$_RET"
   if [ ! -f "${USER_DATA}" ]; then
     echo "Cloud-init file ${USER_DATA} not found!"
     exit 10
@@ -503,6 +530,8 @@ if [ -n "${USER_DATA}" ]; then
 fi
 
 if [ -n "${META_DATA}" ]; then
+  http_download "$META_DATA" "flash.meta_data.yaml"
+  META_DATA="$_RET"
   if [ ! -f "${META_DATA}" ]; then
     echo "Cloud-init file ${META_DATA} not found!"
     exit 10
@@ -510,6 +539,8 @@ if [ -n "${META_DATA}" ]; then
 fi
 
 if [ -n "${FILE}" ]; then
+  http_download "$FILE" "flash.file"
+  FILE="$_RET"
   if [ ! -f "${FILE}" ]; then
     echo "File ${FILE} not found!"
     exit 10
@@ -517,6 +548,8 @@ if [ -n "${FILE}" ]; then
 fi
 
 if [ -n "${BOOT_CONF}" ]; then
+  http_download "$BOOT_CONF" "flash.config.txt"
+  BOOT_CONF="$_RET"
   if [ ! -f "${BOOT_CONF}" ]; then
     echo "File ${BOOT_CONF} not found!"
     exit 10
@@ -524,6 +557,8 @@ if [ -n "${BOOT_CONF}" ]; then
 fi
 
 if [ -n "${CONFIG_FILE}" ]; then
+  http_download "$CONFIG_FILE" "flash.device_init.yaml"
+  CONFIG_FILE="$_RET"
   if [ ! -f "${CONFIG_FILE}" ]; then
     echo "File ${CONFIG_FILE} not found!"
     exit 10
@@ -561,7 +596,7 @@ if [[ -z $CONFIGURE_ONLY ]] ; then
       command -v unzip 2>/dev/null || error "Error: unzip not found. Aborting" 1
       echo "Uncompressing ${image} ..."
       unzip -o "${image}" -d /tmp
-      image=$(unzip -l "${image}" | grep -v Archive: | grep img | awk 'NF>1{print $NF}')
+      image=$(unzip -l "${image}" | grep --color=never -v Archive: | grep --color=never img | awk 'NF>1{print $NF}')
       image="/tmp/${image}"
       echo "Use ${image}"
     fi
@@ -573,7 +608,7 @@ if [[ -z $CONFIGURE_ONLY ]] ; then
       echo "Use ${image}"
     fi
 
-    if [[ "$(file "${image}")" == *"xz compressed data"* ]]; then
+    if [[ "$(file "${image}" | tr '[:upper:]' '[:lower:]' )" == *"xz compressed data"* ]]; then
       command -v xz 2>/dev/null || error "Error: unzip not found. Aborting" 1
       echo "Uncompressing ${image} ..."
       xz -d "${image}" -c >/tmp/image.img
@@ -714,6 +749,14 @@ fi
       echo "Set hostname=${SD_HOSTNAME}"
       sed_i -e "s/.*hostname:.*\$/hostname: ${SD_HOSTNAME}/" "${boot}/user-data"
     fi
+    if [ -n "${WIFI_SSID}" ]; then
+      echo "  Set ssid=${WIFI_SSID}"
+      sed_i -e "/^#/!s/.*ssid=.*\$/      ssid=\"${WIFI_SSID}\"/" "${boot}/user-data"
+    fi
+    if [ -n "${WIFI_PASSWORD}" ]; then
+      echo "  Set psk=${WIFI_PASSWORD}"
+      sed_i -e "/^#/!s/.*psk=.*\$/      psk=\"${WIFI_PASSWORD}\"/" "${boot}/user-data"
+    fi
 
     if [ ! -f "${boot}/meta-data" ]; then
       echo "Creating empty meta-data"
@@ -738,7 +781,7 @@ if [ -f "${boot}/occidentalis.txt" ]; then
 fi
 
 echo "Unmounting ${disk} ..."
-sleep 1
+sleep 5
 
 set +e
 detach "${disk}"
