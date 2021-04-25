@@ -5,6 +5,10 @@
 # Linux initial version by Matt Williams - matt@matthewkwilliams.com
 # MIT License
 
+# Allow user control of which program is used for writing
+# SD card image.
+DD=${DD:-/usr/bin/dd}
+
 set -eo pipefail
 
 error()
@@ -142,7 +146,17 @@ fi
 case "${OSTYPE}" in
   darwin*)
     size_opt="-f %z"
-    bs_size=1m
+    # 'dd' may be one of several; just try the options for size
+    # to see which one is first in PATH.
+    if ${DD} bs=1m count=1 if=/dev/zero of=/dev/null 2>/dev/null; then
+      bs_size=1m
+    elif ${DD} bs=1M count=1 if=/dev/zero of=/dev/null 2>/dev/null; then
+      bs_size=1M
+    else
+        echo "could not determine dd blocksize: is dd installed?"
+	echo "(hint: export environment variable 'DD' with path to 'dd' program)"
+        exit 1
+    fi
 
     # Check that the system has all the needed binaries/requirements in place
     check_requirements() {
@@ -669,11 +683,11 @@ if [[ -z $CONFIGURE_ONLY ]] ; then
   if [[ -x $(command -v pv) ]]; then
     sudo_prompt
     size=$(/usr/bin/stat "$size_opt" "${image}")
-    pv -s "${size}" < "${image}" | sudo dd bs=$bs_size "of=${rawdisk}"
+    pv -s "${size}" < "${image}" | sudo ${DD} bs=$bs_size "of=${rawdisk}"
   else
     echo "No 'pv' command found, so no progress available."
     echo "Press CTRL+T if you want to see the current info of dd command."
-    sudo dd bs=$bs_size "if=${image}" "of=${rawdisk}"
+    sudo ${DD} bs=$bs_size "if=${image}" "of=${rawdisk}"
   fi
 
   wait_for_disk "${disk}"
