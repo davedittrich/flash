@@ -51,3 +51,44 @@ Run a container as a service automatically.
   * adjust your country code
   * attach Pimoroni Blinkt
   * flash, boot your Pi 3/0 - enjoy!
+
+# Secure by default installation using ``psec``
+
+You can avoid having a default password and automatically apply usable defaults for
+most variables you would want to change using [``psec``](https://pypi.org/project/python-secrets/).
+
+```
+$ psec environments create --clone-from sample/hypriot.json
+$ psec secrets generate --from-options
+$ psec -E run -- flash sample/hypriot_psec.yml https://github.com/hypriot/image-builder-rpi/releases/download/v1.8.0/hypriotos-rpi-v1.8.0.img.zip
+```
+
+To see the current variable settings (including the generated password):
+
+```
+$ psec secrets show --no-redact
++--------------------------+------------------------+--------------------------+
+| Variable                 | Value                  | Export                   |
++--------------------------+------------------------+--------------------------+
+| hypriot_user             | pirate                 | hypriot_user             |
+| hypriot_password         | HAMLET.usher.LEND.lazy | hypriot_password         |
+| hypriot_hostname         | hypriot                | hypriot_hostname         |
+| hypriot_eth0_addr        | 192.168.50.1           | hypriot_eth0_addr        |
+| hypriot_client_psk       | None                   | hypriot_client_psk       |
+| hypriot_client_ssid      | None                   | hypriot_client_ssid      |
+| hypriot_pubkey           | None                   | hypriot_pubkey           |
+| hypriot_locale           | en_US.UTF-8            | hypriot_locale           |
+| hypriot_timezone         | America/Los_Angeles    | hypriot_timezone         |
+| hypriot_wifi_country     | US                     | hypriot_wifi_country     |
+| hypriot_keyboard_model   | pc105                  | hypriot_keyboard_model   |
+| hypriot_keyboard_layout  | us                     | hypriot_keyboard_layout  |
+| hypriot_keyboard_options | ctrl:swapcaps          | hypriot_keyboard_options |
++--------------------------+------------------------+--------------------------+
+```
+
+Now log in with username (``pirate``, by default) and the password generated for you.
+
+```
+$ ssh pirate@hypriot.local
+```
+
