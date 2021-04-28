@@ -1,0 +1,135 @@
+#cloud-config
+# vim: syntax=yaml
+
+{# This configuration file is templated using Jinja #}
+{# http://jinja.pocoo.org/docs/2.10/templates/      #}
+#
+# See also the comment about ``cloud-init`` in sample file 'wifi-user-data.yml'.
+#
+# This example controls all variables and secrets using ``python_secrets``
+# (a.k.a., ``psec``). It gets the values for templating from the process
+# environment, so run ``flash`` using ``psec -E --run -- flash [flash_options]``
+#
+# The variables available are:
+# $ psec secrets describe
+# +--------------------------+---------+----------+----------------------------------------------+-----------------------+
+# | Variable                 | Group   | Type     | Prompt                                       | Options               |
+# +--------------------------+---------+----------+----------------------------------------------+-----------------------+
+# | hypriot_user             | hypriot | string   | User name for primary account                | pirate,*              |
+# | hypriot_password         | hypriot | password | Password for primary account                 | *                     |
+# | hypriot_hostname         | hypriot | string   | Host name for your RPi                       | hypriot,*             |
+# | hypriot_eth0_addr        | hypriot | string   | Static IP address for eth0 interface         | 192.168.50.1,*        |
+# | hypriot_eth0_netmask     | hypriot | string   | Network mask for eth0 interface              | 255.255.255.0,*       |
+# | hypriot_client_psk       | hypriot | string   | Pre-shared key for HypriotOS client WiFi AP  | *                     |
+# | hypriot_client_ssid      | hypriot | string   | SSID for HypriotOS client WiFi AP            | *                     |
+# | hypriot_pubkey           | hypriot | string   | SSH public key for accessing primary account | *                     |
+# | hypriot_locale           | hypriot | string   | Locale                                       | en_US.UTF-8,*         |
+# | hypriot_timezone         | hypriot | string   | Timezone                                     | America/Los_Angeles,* |
+# | hypriot_wifi_country     | hypriot | string   | WiFi country code                            | US,*                  |
+# | hypriot_keyboard_model   | hypriot | string   | Keyboard model                               | pc105,*               |
+# | hypriot_keyboard_layout  | hypriot | string   | Keyboard layout                              | us,*                  |
+# | hypriot_keyboard_options | hypriot | string   | Keyboard options                             | ctrl:swapcaps,*       |
+# +--------------------------+---------+----------+----------------------------------------------+-----------------------+
+
+
+hostname: {{ env['hypriot_hostname'] }}
+manage_etc_hosts: true
+
+# You could modify this for your own user information
+users:
+  - name: {{ env['hypriot_user'] }}
+    gecos: "Hypriot Pirate"
+    primary-group: users
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users,docker,adm,dialout,audio,plugdev,netdev,video
+    plain_text_passwd: "{{ env['hypriot_password'] }}"
+    lock_passwd: false
+    ssh-authorized-keys:
+      - {{ env['hypriot_pubkey'] }}
+    ssh_pwauth: true
+    chpasswd: { expire: false }
+
+locale: "{{ env['hypriot_locale'] }}"
+# Value of 'timezone' must exist in /usr/share/zoneinfo
+timezone: "{{ env['hypriot_timezone'] }}"
+
+# Update apt packages on first boot?
+# package_update: true
+# package_upgrade: true
+# package_reboot_if_required: true
+package_upgrade: false
+
+# Install any additional apt packages you need here
+packages:
+ - ntp
+
+# # WiFi connect to HotSpot
+# To make wifi work with RPi3 and RPi0
+# you also have to set "enable_uart=0" in config.txt
+# See no-uart-config.txt for an example.
+#
+# # - use `wpa_passphrase SSID PASSWORD` to encrypt the psk
+write_files:
+  - content: |
+      allow-hotplug wlan0
+      iface wlan0 inet dhcp
+      wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
+      iface default inet dhcp
+    path: /etc/network/interfaces.d/wlan0
+  - content: |
+      auto eth0
+      allow-hotplug eth0
+      iface eth0 inet static
+      address {{ env['hypriot_eth0_addr'] }}
+      netmask {{ env['hypriot_eth0_netmask'] }}
+
+      auto eth0:1
+      allow-hotplug eth0:1
+      iface eth0:1 inet dhcp
+    path: /etc/network/interfaces.d/eth0
+  - content: |
+
+      127.0.1.1 hypriot-client.localdomain hypriot-client
+      127.0.0.1 localhost
+      {{ env['hypriot_eth0_addr'] }} setup client
+
+      ::1 ipv6-localhost ipv6-loopback
+      fe00::0 ipv6-localnet
+      ff00::0 ipv6-mcastprefix
+      ff02::1 ipv6-allnodes
+      ff02::2 ipv6-allrouters
+      ff02::3 ipv6-allhosts
+    path: /etc/hosts
+  - content: |
+      country={{ env['hypriot_country'] }}
+      ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+      update_config=1
+      network={
+        ssid="{{ env['hypriot_ssid'] }}"
+        psk="{{ env['hypriot_psk'] }}"
+        proto=RSN
+        key_mgmt=WPA-PSK
+        pairwise=CCMP
+        auth_alg=OPEN
+      }
+    path: /etc/wpa_supplicant/wpa_supplicant.conf
+  - content: |
+      # KEYBOARD CONFIGURATION FILE
+      # Consult the keyboard(5) manual page.
+      XKBMODEL="{{ env['hypriot_keyboard_model'] }}"
+      XKBLAYOUT="{{ env['hypriot_keyboard_layout'] }}"
+      XKBVARIANT=""
+      XKBOPTIONS="{{ env['hypriot_keyboard_options'] }}"
+      BACKSPACE="guess"
+    path: /etc/default/keyboard
+
+# These commands will be ran once on first boot only
+runcmd:
+  - 'service networking restart'
+  - 'systemctl restart avahi-daemon'
+  - 'ifdown eth0'
+  - 'ifup eth0'
+  - 'ifup wlan0'
+
+# vim: syntax=yaml
